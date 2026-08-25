@@ -1,9 +1,17 @@
+//------------------------------------------------------------------------------
+// Author      : Brian Liau (brian.liau@tufts.edu)
+// File        : AHB_pkg.sv
+// Design Unit : AHB_pkg
+// Description : AHB Lite definitions
+// Target      : Synthesis
+//------------------------------------------------------------------------------
 `timescale 1ns/1ps
 `ifndef AHB_PKG_SV
 `define AHB_PKG_SV
 
 package AHB_pkg;
-
+    
+    // --- Subordinate Information --- 
     parameter int NUM_SUBORDINATES = 3;
     localparam int NTOTAL      = NUM_SUBORDINATES + 1;
     localparam int DEFAULT_IDX = NUM_SUBORDINATES;
@@ -28,15 +36,18 @@ package AHB_pkg;
         $clog2(ADDR_SIZE[2])
     };
 
+    // --- Transfer Size --- 
     localparam logic [2:0] BYTE = 3'b000;
     localparam logic [2:0] HALF = 3'b001;
     localparam logic [2:0] WORD = 3'b010;
 
+    // --- Transfer Types ---
     localparam logic [1:0] IDLE     = 2'b00;
     localparam logic [1:0] BUSY     = 2'b01;
     localparam logic [1:0] NONSEQ   = 2'b10;
     localparam logic [1:0] SEQ      = 2'b11;
 
+    // --- Burst Types --- 
     localparam logic [2:0] SINGLE = 3'b000;
     localparam logic [2:0] INCR   = 3'b001;
     localparam logic [2:0] WRAP4  = 3'b010;

@@ -1,20 +1,31 @@
+//==============================================================================
+// Author      : Brian Liau (brian.liau@tufts.edu)
+// Module:       AHB_TOP_TB
+// Description:  Testbench for AHB_top interconnect module. Validates
+//               single-beat transfers, multi-subordinate memory mapping,
+//               pipelined bus phase timing, two-cycle error responses, and 
+//               HTRANS transfer qualification.
+// Generated   : AHB_TB.vcd 
+//==============================================================================
 `timescale 1ns/1ps
 import AHB_pkg::*;
 
 module AHB_TOP_TB; 
-    logic        HCLK;
-    logic        HRESETn;
-    logic [31:0] HADDR;
-    logic [1:0]  HTRANS;
-    logic        HWRITE;
-    logic [2:0]  HSIZE;
-    logic [31:0] HWDATA;
-    logic [31:0] HRDATA;
-    logic        HRESP;
-    logic        HREADY;
- 
-    int errors = 0;
- 
+    // --- Testbench Signal Declarations ---
+    logic        HCLK;         // System Clock
+    logic        HRESETn;      // Active-Low Asynchronous Reset
+    logic [31:0] HADDR;        // Address of Transfer
+    logic [1:0]  HTRANS;       // Transfer Type (IDLE, BUSY, NONSEQ, SEQ)
+    logic        HWRITE;       // Transfer Direction: 1 = Write, 0 = Read
+    logic [2:0]  HSIZE;        // Transfer Size (BYTE, HALF, WORD)
+    logic [31:0] HWDATA;       // Write Data Bus
+    logic [31:0] HRDATA;       // Read Data Bus
+    logic        HRESP;        // Transfer Response: 0 = OKAY, 1 = ERROR
+    logic        HREADY;       // Transfer Done
+
+    int errors = 0;            // Total test failure counter
+    
+    // -- Device Under Testing (DUT) Instantiation ---  
     AHB_top dut (
         .HCLK    (HCLK),
         .HRESETn (HRESETn),
@@ -28,37 +39,34 @@ module AHB_TOP_TB;
         .HREADY  (HREADY)
     );
  
+    // --- Clock Generation (100 MHz) --- 
     initial begin
         HCLK = 1'b0;
         forever #5 HCLK = ~HCLK;
     end
- 
+    
+    // --- Watchdog Timer ---
     initial begin
         #100000;
         $display("ERROR: simulation timed out");
         $finish;
     end
- 
+    
+    // ---------------------------------------------------------------------
+    // Helper Tasks
+    // ---------------------------------------------------------------------
+    // --- Advance simulation to next positive clock edge ---
     task automatic step();
         @(negedge HCLK);
     endtask
  
+    // --- Increase error count and show error message ---
     task automatic fail(input string msg);
         errors++;
         $display("FAIL @ %0t: %s", $time, msg);
     endtask
  
-    //==================================================================
-    // Per-instance parameter check.
-    //
-    // The elaboration $error checks in AHB_top verify the memory MAP, but
-    // they cannot detect a wrong ADDR_BITS reaching an instance. This can:
-    // it reads the actual array depth each subordinate was built with.
-    //
-    // Without this, the aliasing test below is ambiguous -- a manager that
-    // drives HWDATA a cycle early and a subordinate that aliases produce
-    // identical failure text.
-    //==================================================================
+    // --- Check size of subordinate match package size ---
     task automatic check_params();
         if ($size(dut.sub_gen[0].subordinate.mem) != 32'h1000)
             fail($sformatf("sub0 mem depth %0d, expected 4096",
@@ -71,6 +79,7 @@ module AHB_TOP_TB;
                            $size(dut.sub_gen[2].subordinate.mem)));
     endtask
  
+    // --- Loads memory with expected values used during simulation ---
     task automatic setup_mem();
         // sub 0, offset 0x000 -> 0xDEADBEEF
         dut.sub_gen[0].subordinate.mem[3]   = 8'hDE;
@@ -89,10 +98,7 @@ module AHB_TOP_TB;
         dut.sub_gen[2].subordinate.mem[256] = 8'h44;
     endtask
  
-    //==================================================================
-    // Bus helpers. HTRANS is NONSEQ for the address phase and IDLE
-    // thereafter, so each call issues exactly one transfer.
-    //==================================================================
+    // --- Single Bus Read Transaction and Verification ---
     task automatic read_bus(input logic [31:0] addr,
                             input logic [2:0]  size,
                             input logic [31:0] exp_data,
@@ -135,9 +141,7 @@ module AHB_TOP_TB;
         end
     endtask
  
-    // HWDATA is a DATA-PHASE signal: driven at the second negedge, one
-    // cycle after HADDR. Driving it alongside HADDR makes two consecutive
-    // writes clobber each other.
+    // --- Single Bus Write and Verification --- 
     task automatic write_bus(input logic [31:0] addr,
                              input logic [2:0]  size,
                              input logic [31:0] write_data,
@@ -165,8 +169,7 @@ module AHB_TOP_TB;
         end
     endtask
  
-    // Two-cycle ERROR. A single-cycle helper structurally cannot express
-    // this, which is why read_bus cannot be used for unmapped addresses.
+    // --- Unmapped Address Error with 2-cycle Error Response Verification ---
     task automatic error_bus(input logic [31:0] addr, input string msg);
         @(negedge HCLK);
         HADDR  = addr;
@@ -174,7 +177,7 @@ module AHB_TOP_TB;
         HWRITE = 1'b0;
  
         @(negedge HCLK);          // ERROR cycle 1
-        HTRANS = IDLE;            // the low HREADY gives us time to cancel
+        HTRANS = IDLE;            
         if (HRESP !== 1'b1 || HREADY !== 1'b0)
             fail($sformatf("%s cycle 1: HRESP=%0b HREADY=%0b, want 1/0",
                            msg, HRESP, HREADY));
@@ -183,27 +186,11 @@ module AHB_TOP_TB;
         if (HRESP !== 1'b1 || HREADY !== 1'b1)
             fail($sformatf("%s cycle 2: HRESP=%0b HREADY=%0b, want 1/1",
                            msg, HRESP, HREADY));
+
+        @(negedge HCLK);          // Post recovery cycle
     endtask
  
-    //==================================================================
-    // TRUE back-to-back reads to DIFFERENT subordinates.
-    //
-    // This is the only test that can detect an unregistered mux select.
-    // Every other test holds HADDR pointing at the subordinate being read
-    // while sampling, so hsel_comb and hsel_dphase agree and both a
-    // correct and a broken interconnect pass.
-    //
-    // Here B's address phase overlaps A's data phase: hsel_comb points at
-    // B while hsel_dphase points at A. A combinational select returns B's
-    // data on the first check.
-    //
-    // THE #1 IS REQUIRED HERE. We change HADDR (a combinational input) and
-    // sample HRDATA (a combinational output) in the same timestep, so
-    // without elapsed time the order of the DUT's always_comb versus this
-    // task is undefined. Everywhere else we sample values produced by
-    // registers at an earlier edge, so no race exists and no delay is
-    // needed.
-    //==================================================================
+    // --- Back to Back Bus Reads and N+1 Pipeline Verification ---
     task automatic back_to_back(input logic [31:0] addr_a,
                                 input logic [31:0] exp_a,
                                 input logic [31:0] addr_b,
@@ -233,9 +220,10 @@ module AHB_TOP_TB;
     endtask
  
     //==================================================================
-    // Stimulus
+    // Main Test Execution Block
     //==================================================================
     initial begin
+        // --- System Reset Initialization ---
         HRESETn = 1'b0;
         HADDR   = '0;
         HTRANS  = IDLE;
@@ -246,27 +234,25 @@ module AHB_TOP_TB;
         step();
         step();
  
-        //-------- TEST 0: reset state and instance parameters -----------
-        // Checked WHILE reset is asserted. HREADY must be 1 here: with
-        // hsel_dphase all zeros the interconnect mux falls through to its
-        // defaults, and a 0 there would prevent the first load, holding
-        // HREADY low forever.
+        // --- TEST 0: reset state and instance parameters -----------
+        // Verify correct bus response to reset signal
         $display("--- TEST 0: reset state and instance parameters ---");
         if (HREADY !== 1'b1) fail("HREADY not 1 during reset");
         if (HRESP  !== 1'b0) fail("HRESP not 0 during reset");
         check_params();
  
+        // Release reset and setup memory
         HRESETn = 1'b1;
         setup_mem();
         step();
  
-        //-------- TEST 1: word reads from each subordinate --------------
+        //--- TEST 1: word reads from each subordinate ---
         $display("--- TEST 1: word reads ---");
         read_bus(32'h4000_0000, WORD, 32'hDEADBEEF, 1'b0, 1'b1, "read sub0 @0x000");
         read_bus(32'h4001_0020, WORD, 32'hAABBCCDD, 1'b0, 1'b1, "read sub1 @0x020");
         read_bus(32'h4002_0100, WORD, 32'h11223344, 1'b0, 1'b1, "read sub2 @0x100");
  
-        //-------- TEST 2: back-to-back, different subordinates ----------
+        //--- TEST 2: back-to-back reads , different subordinates ---
         $display("--- TEST 2: back-to-back different subordinates ---");
         back_to_back(32'h4000_0000, 32'hDEADBEEF,
                      32'h4002_0100, 32'h11223344, "sub0 then sub2");
@@ -275,16 +261,15 @@ module AHB_TOP_TB;
         back_to_back(32'h4002_0100, 32'h11223344,
                      32'h4001_0020, 32'hAABBCCDD, "sub2 then sub1");
  
-        //-------- TEST 3: halfword writes -------------------------------
-        // Expectations ACCUMULATE, so each write is checked for touching
-        // only its own lanes.
+        //--- TEST 3: halfword writes ---
+        // Verifies halfword access and byte enable logic
         $display("--- TEST 3: halfword writes ---");
         write_bus(32'h4001_00F0, HALF, 32'h1234BECE, 1'b0, 1'b1, "halfword write @0x0F0");
         read_bus (32'h4001_00F0, WORD, 32'h0000BECE, 1'b0, 1'b1, "verify low half");
         write_bus(32'h4001_00F2, HALF, 32'h9999EEEE, 1'b0, 1'b1, "halfword write @0x0F2");
         read_bus (32'h4001_00F0, WORD, 32'h9999BECE, 1'b0, 1'b1, "verify high half, low intact");
  
-        //-------- TEST 4: byte writes, all four lanes -------------------
+        //--- TEST 4: byte writes, all four lanes ---
         $display("--- TEST 4: byte writes ---");
         write_bus(32'h4001_0FF0, BYTE, 32'hABCDEF27, 1'b0, 1'b1, "byte write lane 0");
         read_bus (32'h4001_0FF0, WORD, 32'h00000027, 1'b0, 1'b1, "verify lane 0");
@@ -297,36 +282,28 @@ module AHB_TOP_TB;
         write_bus(32'h4001_0FF3, BYTE, 32'h02FFFFFF, 1'b0, 1'b1, "byte write lane 3");
         read_bus (32'h4001_0FF0, WORD, 32'h02AA1727, 1'b0, 1'b1, "verify lane 3");
  
-        //-------- TEST 5: reads are SIZE-INDEPENDENT --------------------
-        // mem[0x0FF0..0x0FF3] now holds 27 17 AA 02, i.e. word 0x02AA1727.
-        // All four addresses share one aligned word, and all three sizes
-        // must return that SAME full word. A subordinate need only supply
-        // valid data on the ACTIVE lanes, so returning the whole word is
-        // conformant -- and lane placement comes from the ADDRESS, not
-        // from HSIZE. If any of these returned a masked value, the read
-        // path would be wrongly consulting size_reg.
+        // --- TEST 5: reads are SIZE-INDEPENDENT ---
+        // Reads all return the expected word regardless of transfer size
         $display("--- TEST 5: read size independence ---");
         read_bus(32'h4001_0FF0, WORD, 32'h02AA1727, 1'b0, 1'b1, "word read @0xFF0");
         read_bus(32'h4001_0FF1, BYTE, 32'h02AA1727, 1'b0, 1'b1, "byte read @0xFF1, same word");
         read_bus(32'h4001_0FF2, HALF, 32'h02AA1727, 1'b0, 1'b1, "half read @0xFF2, same word");
         read_bus(32'h4001_0FF3, BYTE, 32'h02AA1727, 1'b0, 1'b1, "byte read @0xFF3, same word");
  
-        //-------- TEST 6: unmapped address -> two-cycle ERROR -----------
+        // --- TEST 6: unmapped address -> two-cycle ERROR ---
         $display("--- TEST 6: unmapped ERROR ---");
         error_bus(32'h5000_0000, "unmapped 0x5000_0000");
         error_bus(32'h4000_1000, "gap above sub0");
         error_bus(32'h4001_2000, "gap above sub1");
  
-        //-------- TEST 7: recovery after an error -----------------------
+        // --- TEST 7: recovery after an error ---
         $display("--- TEST 7: error recovery ---");
         read_bus(32'h4000_0000, WORD, 32'hDEADBEEF, 1'b0, 1'b1, "normal read after error");
         error_bus(32'h5000_0000, "second error after recovery");
         read_bus(32'h4001_0020, WORD, 32'hAABBCCDD, 1'b0, 1'b1, "normal read after 2nd error");
  
-        //-------- TEST 8: region aliasing (per-instance ADDR_BITS) ------
-        // Two addresses 4 KB apart inside sub 2's 16 KB region. If
-        // ADDR_BITS were 12, both would map to offset 0 and the second
-        // write would clobber the first.
+        // --- TEST 8: region aliasing (per-instance ADDR_BITS) ---
+        // Ensure correct address bits into each subordinate
         $display("--- TEST 8: region aliasing ---");
         write_bus(32'h4002_0000, WORD, 32'h11111111, 1'b0, 1'b1, "sub2 write @0x0000");
         write_bus(32'h4002_1000, WORD, 32'h22222222, 1'b0, 1'b1, "sub2 write @0x1000");
@@ -336,13 +313,13 @@ module AHB_TOP_TB;
         read_bus (32'h4002_1000, WORD, 32'h22222222, 1'b0, 1'b1, "sub2 verify @0x1000");
         read_bus (32'h4002_2000, WORD, 32'h33333333, 1'b0, 1'b1, "sub2 verify @0x2000");
         read_bus (32'h4002_3000, WORD, 32'h44444444, 1'b0, 1'b1, "sub2 verify @0x3000");
-        // Same shape for sub 1's 8 KB region.
+        // Same shape for subordinate 1's 8 KB region.
         write_bus(32'h4001_0000, WORD, 32'h55555555, 1'b0, 1'b1, "sub1 write @0x0000");
         write_bus(32'h4001_1000, WORD, 32'h66666666, 1'b0, 1'b1, "sub1 write @0x1000");
         read_bus (32'h4001_0000, WORD, 32'h55555555, 1'b0, 1'b1, "sub1 verify @0x0000");
         read_bus (32'h4001_1000, WORD, 32'h66666666, 1'b0, 1'b1, "sub1 verify @0x1000");
  
-        //-------- TEST 9: cross-subordinate isolation -------------------
+        // --- TEST 9: cross-subordinate isolation ---
         $display("--- TEST 9: cross-subordinate isolation ---");
         write_bus(32'h4000_0004, WORD, 32'h08084050, 1'b0, 1'b1, "write sub0 @0x004");
         read_bus (32'h4000_0004, WORD, 32'h08084050, 1'b0, 1'b1, "verify sub0 @0x004");
@@ -350,10 +327,9 @@ module AHB_TOP_TB;
         read_bus (32'h4001_0020, WORD, 32'hAABBCCDD, 1'b0, 1'b1, "sub1 unchanged");
         read_bus (32'h4002_0100, WORD, 32'h11223344, 1'b0, 1'b1, "sub2 unchanged");
  
-        //-------- TEST 10: HTRANS qualification -------------------------
-        // IDLE and BUSY both have HTRANS[1] == 0, so neither may start a
-        // data phase. We drive HWRITE high with poison on HWDATA and
-        // confirm memory is untouched -- one bit rejects both encodings.
+        // --- TEST 10: HTRANS qualification ---
+        // HTRANS needed to be NONSEQ or SEQ to initiate a transfer regardless
+        // of other signals
         $display("--- TEST 10: IDLE and BUSY must not transfer ---");
         write_bus(32'h4000_0008, WORD, 32'hB0B0B0B0, 1'b0, 1'b1, "seed @0x008");
  
@@ -380,19 +356,21 @@ module AHB_TOP_TB;
             if (HRESP  !== 1'b0) fail("HRESP asserted during BUSY");
         end
  
+        // Return to IDLE and confirm target memory location survived untouched
         @(negedge HCLK);
         HTRANS = IDLE;
         HWRITE = 1'b0;
         read_bus(32'h4000_0008, WORD, 32'hB0B0B0B0, 1'b0, 1'b1,
                  "memory survived IDLE and BUSY");
  
-        //-------- summary -----------------------------------------------
+        //--- Simulation Summary --- 
         step();
         if (errors == 0) $display("=== ALL TESTS PASSED ===");
         else             $display("=== %0d FAILURE(S) ===", errors);
         $finish;
     end
- 
+    
+    // --- Waveform Dump ---
     initial begin
         $dumpfile("AHB_TOP_TB.vcd");
         $dumpvars(0, AHB_TOP_TB);

@@ -1,97 +1,108 @@
+//==============================================================================
+// Author      : Brian Liau (brian.liau@tufts.edu)
+// Module      : AHB_BURST_TB
+// Description : Testbench for AHB_top interconnect module. Validates
+//               BURST transfers for both INCR and WRAP burst types.
+// Generated   : AHB_TB.vcd 
+//==============================================================================
 `timescale 1ns/1ps
-//======================================================================
-// Burst conformance testbench for AHB_top.
-//
-// The fabric needs NO RTL changes to serve bursts: SEQ is 2'b11 so
-// HTRANS[1] is already set, and every beat carries a complete HADDR.
-// This file proves that, so a burst-capable manager can be dropped in.
-//
-// All burst intelligence lives here, on the manager side:
-//   beats_in()   HBURST  -> beat count
-//   bytes_in()   HSIZE   -> bytes per beat
-//   next_addr()  the INCR sum or the WRAP mask-and-or
-//   crosses_1kb() the 1 KB boundary rule
-// Keep these four side-effect free -- they port to manager RTL verbatim.
-//======================================================================
+import AHB_pkg::*;
+
 module AHB_BURST_TB;
-
-    import AHB_pkg::*;
-
     localparam logic [31:0] PAT0 = 32'hA000_0000;   // seed pattern per region
     localparam logic [31:0] PAT1 = 32'hB000_0000;
     localparam logic [31:0] PAT2 = 32'hC000_0000;
     localparam logic [31:0] WPAT = 32'hE000_0000;   // burst-write pattern
 
-    logic        HCLK;
-    logic        HRESETn;
-    logic [31:0] HADDR;
-    logic [1:0]  HTRANS;
-    logic        HWRITE;
-    logic [2:0]  HSIZE;
-    logic [31:0] HWDATA;
-    logic [31:0] HRDATA;
-    logic        HRESP;
-    logic        HREADY;
+    // --- Testbench Signal Declarations ---
+    logic        HCLK;         // System Clock
+    logic        HRESETn;      // Active-Low Asynchronous Reset
+    logic [31:0] HADDR;        // Address of Transfer
+    logic [1:0]  HTRANS;       // Transfer Type (IDLE, BUSY, NONSEQ, SEQ)
+    logic        HWRITE;       // Transfer Direction: 1 = Write, 0 = Read
+    logic [2:0]  HSIZE;        // Transfer Size (BYTE, HALF, WORD)
+    logic [31:0] HWDATA;       // Write Data Bus
+    logic [31:0] HRDATA;       // Read Data Bus
+    logic        HRESP;        // Transfer Response: 0 = OKAY, 1 = ERROR
+    logic        HREADY;       // Transfer Done
 
-    int errors = 0;
+    int errors = 0;            // Total test failure counter
 
     // Address sequence recorded by the burst helpers, so the WRAP order
     // can be asserted directly instead of inferred from the data.
     logic [31:0] seq_log [16];
     int          seq_len;
 
+    // -- Device Under Testing (DUT) Instantiation ---  
     AHB_top dut (
-        .HCLK(HCLK), .HRESETn(HRESETn), .HADDR(HADDR), .HTRANS(HTRANS),
-        .HWRITE(HWRITE), .HSIZE(HSIZE), .HWDATA(HWDATA),
-        .HRDATA(HRDATA), .HRESP(HRESP), .HREADY(HREADY)
+        .HCLK    (HCLK),
+        .HRESETn (HRESETn),
+        .HADDR   (HADDR),
+        .HTRANS  (HTRANS),
+        .HWRITE  (HWRITE),
+        .HSIZE   (HSIZE),
+        .HWDATA  (HWDATA),
+        .HRDATA  (HRDATA),
+        .HRESP   (HRESP),
+        .HREADY  (HREADY)
     );
 
+    // --- Clock Generation (100 MHz) --- 
     initial begin
         HCLK = 1'b0;
         forever #5 HCLK = ~HCLK;
     end
 
+    // --- Watchdog Timer ---
     initial begin
         #200000;
         $display("ERROR: simulation timed out");
         $finish;
     end
 
+    // ---------------------------------------------------------------------
+    // Helper Tasks
+    // ---------------------------------------------------------------------
+    // --- Advance simulation to next negative clock edge ---
+    task automatic step();
+        @(negedge HCLK);
+    endtask
+
+    // --- Increase error count and show error message ---
     task automatic fail(input string msg);
         errors++;
         $display("FAIL @ %0t: %s", $time, msg);
     endtask
 
-    //==================================================================
-    // The four manager-side functions. These are the whole of "burst
-    // support" and they port to RTL unchanged.
-    //==================================================================
+    // --- Calculates how many beats for each burst transfer in int form ---
     function automatic int beats_in(input logic [2:0] burst);
         case (burst)
-            SINGLE:        return 1;
+            SINGLE       : return 1;
             WRAP4,  INCR4: return 4;
             WRAP8,  INCR8: return 8;
             WRAP16, INCR16:return 16;
-            default:       return 0;    // INCR: undefined length, caller supplies
+            default      : return 0;    // INCR: undefined length, caller supplies
         endcase
     endfunction
 
+    // --- Calculates how many beats for each burst transfer in array form ---
     function automatic logic [31:0] bytes_in(input logic [2:0] size);
-        return 32'h1 << size;           // 1, 2, 4
+        return 32'h1 << size;          // 1, 2, 4
     endfunction
 
+    // --- Confirms if the transfer is a WRAP transfer type ---
     function automatic bit is_wrap(input logic [2:0] burst);
         return (burst == WRAP4) || (burst == WRAP8) || (burst == WRAP16);
     endfunction
 
-    // WRAP: base is computed ONCE from the burst's start address, not per
-    // beat. The & mask discards the carry out of the block; the | base
+    // WRAP: base is computed ONCE from the burst's start address
+    // The & mask discards the carry out of the block; the | base
     // puts you back into the right block.
     function automatic logic [31:0] next_addr(input logic [31:0] a,
-                                              input logic [31:0] start,
-                                              input logic [2:0]  burst,
-                                              input logic [2:0]  size,
-                                              input int          nbeats);
+                                               input logic [31:0] start,
+                                               input logic [2:0]  burst,
+                                               input logic [2:0]  size,
+                                               input int          nbeats);
         logic [31:0] bytes, total, mask, base;
         bytes = bytes_in(size);
         if (is_wrap(burst)) begin
@@ -168,10 +179,6 @@ module AHB_BURST_TB;
     //==================================================================
     // Bus helpers
     //==================================================================
-    task automatic step();
-        @(negedge HCLK);
-    endtask
-
     // Single word read, used to verify burst writes beat by beat.
     task automatic read_word(input logic [31:0] a,
                              input logic [31:0] exp,
@@ -272,9 +279,10 @@ module AHB_BURST_TB;
     endtask
 
     //==================================================================
-    // Stimulus
+    // Main Test Execution Block
     //==================================================================
     initial begin
+        // --- System Reset Initialization ---
         HRESETn = 1'b0;
         HADDR   = BASE_ADDR[0];
         HTRANS  = IDLE;
@@ -287,7 +295,7 @@ module AHB_BURST_TB;
         seed_mem();
         step();
 
-        //-------- TEST 1: address arithmetic, no bus traffic -----------
+        // --- TEST 1: address arithmetic, no bus traffic ---
         // Pure function checks. If these fail, nothing below is readable.
         $display("--- TEST 1: next_addr arithmetic ---");
         if (next_addr(32'h100, 32'h100, INCR4, WORD, 4) !== 32'h104)
@@ -310,7 +318,7 @@ module AHB_BURST_TB;
         if (next_addr(32'h3C, 32'h24, WRAP8, WORD, 8) !== 32'h20)
             fail("WRAP8 wrap at 0x3C -> 0x20");
 
-        //-------- TEST 2: the 1 KB rule -------------------------------
+        // --- TEST 2: the 1 KB rule ---
         // Includes a deliberate violator, so the check itself is tested.
         $display("--- TEST 2: 1 KB boundary detection ---");
         if (crosses_1kb(32'h4000_0000, INCR16, WORD, 16) !== 1'b0)
@@ -320,7 +328,7 @@ module AHB_BURST_TB;
         if (crosses_1kb(32'h4000_03F8, WRAP4, WORD, 4) !== 1'b0)
             fail("WRAP can never cross a 1 KB boundary");
 
-        //-------- TEST 3: INCR4 read, zero wait states ----------------
+        // --- TEST 3: INCR4 read, zero wait states ---
         $display("--- TEST 3: INCR4 read, sub0 (0 waits) ---");
         burst_read(32'h4000_0100, INCR4, WORD, 0, "INCR4 sub0");
         chk_seq(0, 32'h4000_0100, "INCR4 sub0");
@@ -328,7 +336,7 @@ module AHB_BURST_TB;
         chk_seq(2, 32'h4000_0108, "INCR4 sub0");
         chk_seq(3, 32'h4000_010C, "INCR4 sub0");
 
-        //-------- TEST 4: INCR4 read into a slow subordinate ----------
+        // --- TEST 4: INCR4 read into a slow subordinate ---
         // sub2 has 3 wait states, so every beat stalls and beat N+1's
         // address phase extends alongside beat N's data phase. This is
         // the interaction that nothing before this file exercised.
@@ -338,7 +346,7 @@ module AHB_BURST_TB;
         $display("--- TEST 5: INCR8 read, sub2 (3 waits) ---");
         burst_read(32'h4002_0300, INCR8, WORD, 0, "INCR8 sub2 slow");
 
-        //-------- TEST 6: WRAP4 from mid-block ------------------------
+        // --- TEST 6: WRAP4 from mid-block ---
         // The address sequence is the point, so assert it directly.
         $display("--- TEST 6: WRAP4 read from mid-block, sub1 (1 wait) ---");
         burst_read(32'h4001_0108, WRAP4, WORD, 0, "WRAP4 sub1");
@@ -353,7 +361,7 @@ module AHB_BURST_TB;
         chk_seq(6, 32'h4002_043C, "WRAP8 sub2");
         chk_seq(7, 32'h4002_0420, "WRAP8 sub2");
 
-        //-------- TEST 8: sub-word burst ------------------------------
+        // --- TEST 8: sub-word burst ---
         // Byte beats crossing a word boundary. Confirms word_base and
         // byte_en are recomputed per beat.
         $display("--- TEST 8: INCR4 byte read crossing a word boundary ---");
@@ -361,14 +369,14 @@ module AHB_BURST_TB;
         chk_seq(0, 32'h4001_0202, "INCR4 byte");
         chk_seq(2, 32'h4001_0204, "INCR4 byte");   // now in the next word
 
-        //-------- TEST 9: INCR4 write then read back ------------------
+        // --- TEST 9: INCR4 write then read back ---
         $display("--- TEST 9: INCR4 write, sub1 ---");
         burst_write(32'h4001_0500, INCR4, WORD, 0, "INCR4 write sub1");
         for (int b = 0; b < 4; b++)
             read_word(32'h4001_0500 + b*4, wr_data(32'h4001_0500 + b*4),
                       $sformatf("INCR4 write verify beat %0d", b));
 
-        //-------- TEST 10: WRAP4 write then read back -----------------
+        // --- TEST 10: WRAP4 write then read back ---
         // Verified in ASCENDING address order, not burst order: all four
         // words of the block must be written regardless of visit order.
         $display("--- TEST 10: WRAP4 write from mid-block, sub2 ---");
@@ -377,12 +385,12 @@ module AHB_BURST_TB;
             read_word(32'h4002_0600 + b*4, wr_data(32'h4002_0600 + b*4),
                       $sformatf("WRAP4 write verify word %0d", b));
 
-        //-------- TEST 11: undefined-length INCR ----------------------
+        // --- TEST 11: undefined-length INCR ---
         $display("--- TEST 11: INCR with explicit length 6 ---");
         burst_read(32'h4000_0300, INCR, WORD, 6, "INCR6 sub0");
         chk_seq(5, 32'h4000_0314, "INCR6 sub0");
 
-        //-------- TEST 12: BUSY between beats -------------------------
+        // --- TEST 12: BUSY between beats ---
         // BUSY holds the NEXT beat's address while telling subordinates
         // not to start a data phase. Legal only inside a burst.
         $display("--- TEST 12: BUSY inserted mid-burst ---");
@@ -393,33 +401,34 @@ module AHB_BURST_TB;
             HADDR = a; HTRANS = NONSEQ; HSIZE = WORD; HWRITE = 1'b0;
             while (HREADY !== 1'b1) step();
 
-            step();                                   // beat 0 data phase
+            step();                             // beat 0 data phase
             a = a + 4; HADDR = a; HTRANS = SEQ;
             while (HREADY !== 1'b1) step();
             if (HRDATA !== exp_word(32'h4000_0400)) fail("BUSY test beat 0");
 
-            step();                                   // beat 1 data phase
-            HTRANS = BUSY;                            // hold beat 2's address
+            step();                             // beat 1 data phase
+            HTRANS = BUSY;                      // hold beat 2's address
             while (HREADY !== 1'b1) step();
             if (HRDATA !== exp_word(32'h4000_0404)) fail("BUSY test beat 1");
 
-            step();                                   // BUSY cycle: no data phase
+            step();                             // BUSY cycle: no data phase
             if (HREADY !== 1'b1) fail("BUSY must not stall the bus");
             a = a + 4; HADDR = a; HTRANS = SEQ;
 
-            step();                                   // beat 2 data phase
+            step();                             // beat 2 data phase
             HTRANS = IDLE;
             while (HREADY !== 1'b1) step();
             if (HRDATA !== exp_word(32'h4000_0408)) fail("BUSY test beat 2");
         end
 
-        //-------- summary ---------------------------------------------
+        //--- Simulation Summary --- 
         step();
         if (errors == 0) $display("=== ALL BURST TESTS PASSED ===");
         else             $display("=== %0d FAILURE(S) ===", errors);
         $finish;
     end
 
+    // --- Waveform Dump ---
     initial begin
         $dumpfile("AHB_BURST_TB.vcd");
         $dumpvars(0, AHB_BURST_TB);

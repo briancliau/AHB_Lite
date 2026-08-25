@@ -1,27 +1,40 @@
+//------------------------------------------------------------------------------
+// Author      : Brian Liau (brian.liau@tufts.edu)
+// File        : AHB_top.sv
+// Design Unit : AHB_top
+// Description : AHB interconnect and subordinate setup for manager connection
+// Dependencies: AHB_pkg.sv
+// Target      : Synthesizable
+//------------------------------------------------------------------------------
 `timescale 1ns/1ps
 import AHB_pkg::*;
 
 module AHB_top (
-    input  logic        HCLK,
-    input  logic        HRESETn,
-    input  logic [31:0] HADDR,
-    input  logic [1:0]  HTRANS,
-    input  logic        HWRITE,
-    input  logic [2:0]  HSIZE,
-    input  logic [31:0] HWDATA,
-    output logic [31:0] HRDATA,
-    output logic        HRESP,
-    output logic        HREADY
+    // --- Clock and Reset ---
+    input  logic        HCLK,           // System clock
+    input  logic        HRESETn,        // Active low asynchronous reset
+
+    // --- Address Phase Signals ---
+    input  logic [31:0] HADDR,          // Address of Transfer     
+    input  logic [1:0]  HTRANS,         // Transfer type (00: IDLE, 01: BUSY, 10: NONSEQ, 11: SEQ)
+    input  logic        HWRITE,         // Transfer direction: (0: Read, 1: Write)
+    input  logic [2:0]  HSIZE,          // Transfer size
+
+    // -- Data Phase Signals --- 
+    input  logic [31:0] HWDATA,         // Write data bus
+    output logic [31:0] HRDATA,         // Read data bus
+    output logic        HRESP,          // Subordinate response (0: Okay, 1: Error) 
+    output logic        HREADY          // AHB bus ready signal
 );
-    // Interconnect output signals
+    // --- Interconnect output signals --- 
     logic [NTOTAL-1:0]  HSELx;
 
-    // Subordinate output arrays back to interconnect
+    // --- Subordinate output signals to interconnect ---
     logic [NTOTAL-1:0]  HREADYOUT_S;
     logic [NTOTAL-1:0]  HRESP_S;
     logic [31:0]        HRDATA_S [NTOTAL];
 
-    // Interconnect instantiation
+    // --- Interconnect Instantiation ---
     AHB_interconnect ic (
         .HCLK(HCLK),
         .HRESETn(HRESETn),
@@ -35,7 +48,7 @@ module AHB_top (
         .HSELx(HSELx)
     );
 
-    // Subordinate instantiations
+    // --- Subordinate Instantiation ---
     generate
         for (genvar i = 0; i < NUM_SUBORDINATES; i++) begin : sub_gen
             if ((32'h1 << ADDR_BITS[i]) != ADDR_SIZE[i])
@@ -61,6 +74,7 @@ module AHB_top (
         end
     endgenerate
 
+    // --- Default Subordinate Instantiation ---
     AHB_default_subordinate default_subordinate (
         .HCLK(HCLK),
         .HRESETn(HRESETn),

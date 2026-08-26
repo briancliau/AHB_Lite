@@ -133,6 +133,6 @@ Execute the full 11-stage verification suite locally:
 verilator --binary --timing --top AHB_TOP_TB -f filelist.f
 
 # Run simulation
-./obj_dir/VAHB_TOP/TB
+./obj_dir/VAHB_TOP_TB
 ```
 

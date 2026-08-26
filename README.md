@@ -99,7 +99,7 @@ Verification is executed using Verilator with an 11-stage comprehensive self-che
 
 ### Waveform Analysis: 2-Cycle Error Response
 
-![AHB-Lite Error Recovery Waveform](docs/waveforms/hresp_error_waveform.png)
+![AHB-Lite Error Recovery Waveform](docs/hresp_error_waveform.png)
 
 *Figure 2: Waveform snippet demonstrating the 2-cycle HRESP error sequence when accessing unmapped address space (TEST 6 & 7).*
 

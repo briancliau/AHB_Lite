@@ -130,9 +130,12 @@ Execute the full 11-stage verification suite locally:
 
 ```bash
 # Compile design and testbench
-verilator --binary --timing --top AHB_TOP_TB -f filelist.f
+verilator --binary --timing --top AHB_TOP_TB --trace -f filelist.f
 
 # Run simulation
 ./obj_dir/VAHB_TOP_TB
+
+# View Waveform
+gtkwave AHB_TOP_TB.vcd
 ```
 

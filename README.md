@@ -1,4 +1,4 @@
-# SystemVerilog AMBA 3 AHB-Lite Master Controller
+# Parameterized AMBA AHB-Lite Interconnect & Subordinate RTL IP
 
 A modular, parameterizable **AMBA 3 AHB-Lite Master Interface** written in SystemVerilog. Designed to connect generic memory requests to standard AHB-Lite bus interconnect and subordiantes with full stall management, address-phase pipeline logic, and error handling.
 

@@ -124,7 +124,10 @@ Verification is executed using Verilator with an 11-stage comprehensive self-che
 
 ### Running the Verification Suite
 
-**Prerequisites:** Verilator v5.000+ (compiled with `--timing` support).
+**Prerequisites:** 
+* Verilator v5.000+ (compiled with `--timing` support).
+* GTKWave
+
 
 Execute the full 11-stage verification suite locally:
 

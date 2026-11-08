@@ -1,6 +1,6 @@
 # Parameterized AMBA AHB-Lite Interconnect & Subordinate RTL IP
 
-A modular, parameterizable **AMBA 3 AHB-Lite Manager Interface** written in SystemVerilog. Designed to connect generic memory requests to standard AHB-Lite bus interconnect and subordiantes with full stall management, address-phase pipeline logic, and error handling.
+A modular, parameterizable **AMBA 3 AHB-Lite Interconnect and Subordinate RTL IP** written in SystemVerilog. Designed to route and decode transactions from a user-supplied manager interface to standard AHB-Lite bus subordinates, featuring full stall management, address-phase pipeline support, and robust error handling.
 
 ---
 
@@ -40,12 +40,12 @@ A modular, parameterizable **AMBA 3 AHB-Lite Manager Interface** written in Syst
 | `HSIZE` | 3-bit | Transfer size (Byte = 3'b000, Half-word = 3'b001, Word = 3'b010) |
 | `HWDATA` | 32-bit | Write data bus (driven during Data Phase) |
 
-### Slave Input Signals (AHB Bus)
+### Subordinate Input Signals (AHB Bus)
 | Signal | Width | Description |
 | :--- | :--- | :--- |
 | `HRDATA` | 32-bit | Read data bus |
-| `HREADY` | 1-bit | Slave ready indicator (high when transfer complete) |
-| `HRESP` | 1-bit | Slave transfer response (0 = OKAY, 1 = ERROR) |
+| `HREADY` | 1-bit | Subordinate ready indicator (high when transfer complete) |
+| `HRESP` | 1-bit | Subordinate transfer response (0 = OKAY, 1 = ERROR) |
 
 ---
 

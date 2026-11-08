@@ -1,6 +1,6 @@
 # Parameterized AMBA AHB-Lite Interconnect & Subordinate RTL IP
 
-A modular, parameterizable **AMBA 3 AHB-Lite Master Interface** written in SystemVerilog. Designed to connect generic memory requests to standard AHB-Lite bus interconnect and subordiantes with full stall management, address-phase pipeline logic, and error handling.
+A modular, parameterizable **AMBA 3 AHB-Lite Manager Interface** written in SystemVerilog. Designed to connect generic memory requests to standard AHB-Lite bus interconnect and subordiantes with full stall management, address-phase pipeline logic, and error handling.
 
 ---
 
@@ -16,7 +16,7 @@ A modular, parameterizable **AMBA 3 AHB-Lite Master Interface** written in Syste
 * **AMBA 3 AHB-Lite Compliance:** Implements standard `HTRANS`, `HADDR`, `HWRITE`, `HSIZE`, `HRDATA`, `HWDATA`, `HREADY`, and `HRESP` signals. 
 * **Dynamic Subordinates:** Allows for parameterizable number of subordinates and subordinate sizes by modifying the AHB_pkg.sv file.
 * **Pipelined Bus Protocol:** Decouples address and data phases to support full single-cycle throughput without insertable wait-states.
-* **Stall & Ready Handling:** Safely pauses CPU/Master requests when target subordinates assert wait states (`HREADY = 0`).
+* **Stall & Ready Handling:** Safely pauses CPU/Manager requests when target subordinates assert wait states (`HREADY = 0`).
 * **Error Recovery:** Detects subordinate error conditions (`HRESP = 1`) and flags fault states to the manager.
 * **Transfer Width:** Multi-size support (`HSIZE`) for Byte, Half-Word, and Word access alignment.
 * **Verification-Ready:** Structured for seamless binding with SystemVerilog Assertions (SVA) to monitor protocol compliance.
@@ -31,7 +31,7 @@ A modular, parameterizable **AMBA 3 AHB-Lite Master Interface** written in Syste
 | `HCLK` | Input | System Clock |
 | `HRESETn` | Input | Active-Low Asynchronous Reset |
 
-### Master Output Signals (AHB Bus)
+### Manager Output Signals (AHB Bus)
 | Signal | Width | Description |
 | :--- | :--- | :--- |
 | `HADDR` | 32-bit | Byte address of the transfer |
